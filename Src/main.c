@@ -46,6 +46,7 @@
 #define TAMQUADRADO				56.3
 #define X				TS_State.touchX[0]
 #define Y				TS_State.touchY[0]
+#define RAIO					22
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -77,12 +78,14 @@ volatile uint8_t tempCnt = 0;
 volatile uint8_t seconds = 0;
 volatile uint8_t minutes=0;
 char string[50];
+int reset=0;
 
 //FLAGS
 volatile uint8_t DBFLAG=0; 		//flag para debouncing
 bool TEMPFLAG=false;			//flag para entrar na temperatura
 bool TIMEFLAG=false;			//flag da contagem do tempo
 volatile uint8_t PLAYERFLAG=0;	//flag para trocar jogador
+volatile uint8_t MENUFLAG=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -103,6 +106,10 @@ static void LCD_Config();
 /* USER CODE BEGIN 0 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
+	if(GPIO_Pin==GPIO_PIN_0){
+		reset=1;
+	}
+
 	if(GPIO_Pin==GPIO_PIN_13)
 	{
 		if(DBFLAG == 0)
@@ -114,6 +121,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	}
 }
 
+//GOAL1
 void temperatura() {
 	uint32_t ConvertedValue;
 	long int JTemp;
@@ -130,28 +138,21 @@ void temperatura() {
 
 			/* Display the Temperature Value on the LCD */
 			sprintf(desc, "Temp: %ldC", JTemp);
-			//BSP_LCD_FillRect(BSP_LCD_GetXSize()-170, 0, (uint8_t *) desc, LEFT_MODE);
+			//BSP_LCD_FillRect(BSP_LCD_GetXSize()-160, 0, (uint8_t *) desc, LEFT_MODE);
 			BSP_LCD_SetBackColor(LCD_COLOR_YELLOW);
-			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-170, 0, (uint8_t *) desc, LEFT_MODE);
-			BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()-170);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-160, 0, (uint8_t *) desc, LEFT_MODE);
+			BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()-160);
 		}
 	}
 }
 
-/*void menu(){
-
-
-	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()/2, BSP_LCD_GetYSize()/2, (uint8_t *) desc, CENTER_MODE);
-	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()/);
-
-}*/
-
+//GOAL 2
 void tab(){
 	int i=0, j=30;
 	/*int x=BSP_LCD_GetXSize()/2;
 	int y=BSP_LCD_GetYSize();*/
 
-	for(i=0; i<BSP_LCD_GetXSize()/2; i+=TAMQUADRADO)
+	for(i=0; i<BSP_LCD_GetXSize()-360; i+=TAMQUADRADO)
 	{
 		/*BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
 		BSP_LCD_FillRect(i, 30, TAMQUADRADO, TAMQUADRADO);
@@ -169,42 +170,120 @@ void tab(){
 	limites();
 }
 
+//GOAL 3
+void limites(){
+	int i=0, j=0;
+
+	/*memset(string, '\0', 50);
+	sprintf(string, "X= %d", X);
+	BSP_LCD_ClearStringLine(4);
+	BSP_LCD_DisplayStringAtLine(4, (uint8_t *)string);
+
+	memset(string, '\0', 50);
+	sprintf(string, "Y= %d", Y);
+	BSP_LCD_ClearStringLine(5);
+	BSP_LCD_DisplayStringAtLine(5, (uint8_t *)string);*/
+
+	for(i=0; i<BSP_LCD_GetXSize()-360; i+=TAMQUADRADO){
+		for(j=30;j<BSP_LCD_GetYSize()-30;j+=TAMQUADRADO){
+			if(X<BSP_LCD_GetXSize()-360-RAIO  && X>RAIO && Y>(30+RAIO) && Y<BSP_LCD_GetYSize()-RAIO){
+				if(X>i && X<(i+=TAMQUADRADO) && Y>j && Y<(j+=TAMQUADRADO))
+					drawPiece(i,j);
+			}
+			else
+				DBFLAG=0;
+		}
+	}
+}
+
+//GOAL 4
+
+//GOAL 5
+void menu(){
+
+
+	char escolha[50];
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+
+
+	printf("Novo Jogo", escolha);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()/4, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, CENTER_MODE);
+	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()/4);
+
+	printf("Carregar Jogo", escolha);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-200, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, CENTER_MODE);
+	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()/4);
+
+	if(X<BSP_LCD_GetXSize()/2 && X>0 && Y>0 && Y<BSP_LCD_GetYSize())
+		joga();
+	//if(X>BSP_LCD_GetXSize()/2 && X<BSP_LCD_GetXSize() && Y>0 && Y<BSP_LCD_GetYSize())
+		//carrega jogo
+}
+
+void drawPiece(int i, int j){
+
+	//int i=0, j=30;
+
+
+	if(DBFLAG == 1){
+		HAL_Delay(100);
+		DBFLAG=0;
+
+		if(PLAYERFLAG==0){
+			BSP_LCD_DrawCircle((i+TAMQUADRADO)/2, (j+TAMQUADRADO)/2, RAIO);
+			PLAYERFLAG=1;
+		}
+		else{
+			BSP_LCD_FillCircle((i+TAMQUADRADO)/2, (j+TAMQUADRADO)/2, RAIO);
+			PLAYERFLAG=0;
+		}
+	}
+}
+
+//GOAL8
 void tempoJogo()
 {
 	char t[50];
 
+	sprintf(t, "Total Time: %02d:%02d", minutes, seconds);
+	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 31, (uint8_t *)t, LEFT_MODE);
+	//seconds=timeTotal-(60*i);
+	if(seconds>59){
+		minutes++;
+		seconds=0;
+	}
+}
 
-	/*if(updateTimeCnt >= 1){	//Updates display with total time once a second
-		updateTimeCnt = 0;
+//GOAL 9
 
-		if(timeTotal>=0 && timeTotal<=59){
-			sprintf(t, "Total Time: 0:%02d", timeTotal);
-			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
-			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-270, 31, (uint8_t *)t, LEFT_MODE);
-			BSP_LCD_ClearStringLine(31);
-		}
-		//else
-			if(timeTotal>=(60*i)){
-				minute=timeTotal/(60*i);
-				//countsec++;
-				seconds=timeTotal-(60*i);
+void joga(){
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	temperatura();
+	tab();
+	tempoJogo();
+	if(reset==1)
+	  restart();
+}
 
-				sprintf(t, "Total Time: %d:%02d", minute, seconds);
-				BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
-				BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-270, 31, (uint8_t *)t, LEFT_MODE);
+void restart(){
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	LCD_Config();
 
-			}*/
+	reset=0;
+	timeTotal=0;
+	tempCnt = 0;
+	seconds = 0;
+	minutes=0;
 
-			sprintf(t, "Total Time: %02d:%02d", minutes, seconds);
-			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
-			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 31, (uint8_t *)t, LEFT_MODE);
-			//seconds=timeTotal-(60*i);
-			if(seconds>59){
-				minutes++;
-				seconds=0;
-			}
-			//i++;
-	//}
+
+	//FLAGS
+	DBFLAG=0;
+	TEMPFLAG=false;
+	TIMEFLAG=false;
+	PLAYERFLAG=0;
+
+	//menu();
 }
 
 void getTouch(){
@@ -224,48 +303,6 @@ void getTouch(){
 		  }
 }
 
-void drawPiece(){
-
-	//int i=0, j=30;
-
-
-	if(DBFLAG == 1){
-		HAL_Delay(100);
-		DBFLAG=0;
-
-		if(PLAYERFLAG==0){
-			BSP_LCD_DrawCircle(X, Y, 22);
-			PLAYERFLAG=1;
-		}
-		else{
-			BSP_LCD_FillCircle(X, Y, 22);
-			PLAYERFLAG=0;
-		}
-	}
-}
-
-void limites(){
-	int i=0, j=0;
-
-	/*memset(string, '\0', 50);
-	sprintf(string, "X= %d", X);
-	BSP_LCD_ClearStringLine(4);
-	BSP_LCD_DisplayStringAtLine(4, (uint8_t *)string);
-
-	memset(string, '\0', 50);
-	sprintf(string, "Y= %d", Y);
-	BSP_LCD_ClearStringLine(5);
-	BSP_LCD_DisplayStringAtLine(5, (uint8_t *)string);*/
-
-	for(i=0; i<BSP_LCD_GetXSize()/2; i+=TAMQUADRADO){
-		for(j=30;j<BSP_LCD_GetYSize()-30;j+=TAMQUADRADO){
-			if(X<BSP_LCD_GetXSize()/2  && X>0 && Y>30 && Y<BSP_LCD_GetYSize())
-				drawPiece();
-			else
-				DBFLAG=0;
-		}
-	}
-}
 /* USER CODE END 0 */
 
 /**
@@ -322,19 +359,23 @@ int main(void)
   	//HAL_ADC_Start_IT(&hadc3);
 
   	HAL_TIM_Base_Start_IT(&htim6);
+
+  	//menu();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  temperatura();
-//	  limites();
 
-	  //menu();
-	  tab();
-	  tempoJogo();
-//	  drawPiece();
+	  //joga();
+	  temperatura();
+	  	tab();
+	  	tempoJogo();
+	  	if(reset==1)
+	  	  restart();
+
 
     /* USER CODE END WHILE */
 
@@ -823,6 +864,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOI_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOJ_CLK_ENABLE();
 
   /*Configure GPIO pin : PI13 */
@@ -831,7 +873,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PA0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
@@ -875,10 +926,9 @@ static void LCD_Config(void)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) { //comum para todos os timers
 
 	if (htim->Instance == TIM6){
+		tempCnt ++;
 		timeTotal++;
 		seconds++;
-		tempCnt ++;
-		//updateTimeCnt ++;
 	}
 	if (htim->Instance == TIM7)
 		TIMEFLAG=true;
