@@ -20,6 +20,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -63,6 +64,8 @@ DSI_HandleTypeDef hdsi;
 
 LTDC_HandleTypeDef hltdc;
 
+SD_HandleTypeDef hsd2;
+
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7;
 
@@ -73,19 +76,27 @@ SDRAM_HandleTypeDef hsdram1;
 TS_StateTypeDef TS_State;
 
 volatile uint32_t ConvertedValue;
-volatile int timeTotal=0;
-volatile uint8_t tempCnt = 0;
-volatile uint8_t seconds = 0;
-volatile uint8_t minutes=0;
+volatile uint8_t tempCnt = 0;		//contador para alterar a temperatura a cada 2 segundos
+volatile int timeTotal=0;			//contador do tempo total de jogo
+volatile uint8_t seconds = 0;		//contador para converter o tempo total em segundos
+volatile uint8_t minutes=0;			//contador para os minutos do tempo total
+volatile uint8_t ctdown=20;			//contador do tempo de jogada
+volatile uint8_t touchCircle=0;		//contador de toques da peça branca
+volatile uint8_t touchFill=0;		//contador de toques da peça preta
+volatile uint8_t ctJogadas=0;		//contador para o numero de jogadas
+
 char string[50];
 int reset=0;
 
+
 //FLAGS
-volatile uint8_t DBFLAG=0; 		//flag para debouncing
-bool TEMPFLAG=false;			//flag para entrar na temperatura
-bool TIMEFLAG=false;			//flag da contagem do tempo
-volatile uint8_t PLAYERFLAG=0;	//flag para trocar jogador
-volatile uint8_t MENUFLAG=0;
+volatile uint8_t DBFLAG=0; 				//flag para debouncing
+bool TEMPFLAG=false;					//flag para entrar na temperatura
+volatile uint8_t PLAYERFLAG=0;			//flag para trocar jogador
+volatile uint8_t TIMEFLAG=0;			//flag para contador decrescente
+volatile uint8_t MENUFLAG=0;			//flag para entrar no menu
+volatile uint8_t UPDATE_DISPLAY = 0;	//flag para update display
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -96,6 +107,7 @@ static void MX_DMA2D_Init(void);
 static void MX_DSIHOST_DSI_Init(void);
 static void MX_FMC_Init(void);
 static void MX_LTDC_Init(void);
+static void MX_SDMMC2_SD_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
@@ -115,7 +127,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 		if(DBFLAG == 0)
 		{
 			DBFLAG=1;
-
+			UPDATE_DISPLAY = 1;
 			BSP_TS_GetState(&TS_State);
 		}
 	}
@@ -146,6 +158,61 @@ void temperatura() {
 	}
 }
 
+void drawPiece(int i, int j){
+
+	if(DBFLAG == 1){
+		HAL_Delay(100);
+		DBFLAG=0;
+
+		if(PLAYERFLAG==0){
+			BSP_LCD_DrawCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
+			PLAYERFLAG=1;
+			touchCircle++;
+			ctJogadas++;
+		}
+		else{
+			BSP_LCD_FillCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
+			PLAYERFLAG=0;
+			touchFill++;
+			ctJogadas++;
+		}
+	}
+}
+
+//GOAL 3
+void limites()
+{
+	int i=0, j=0;
+
+	/*memset(string, '\0', 50);
+	sprintf(string, "X= %d", X);
+	BSP_LCD_ClearStringLine(4);
+	BSP_LCD_DisplayStringAtLine(4, (uint8_t *)string);
+
+	memset(string, '\0', 50);
+	sprintf(string, "Y= %d", Y);
+	BSP_LCD_ClearStringLine(5);
+	BSP_LCD_DisplayStringAtLine(5, (uint8_t *)string);*/
+
+	for(i=0; i<BSP_LCD_GetXSize()-360; i+=TAMQUADRADO)
+	{
+		for(j=30;j<BSP_LCD_GetYSize()-30;j+=TAMQUADRADO)
+		{
+			if(X<BSP_LCD_GetXSize()-360  && X >= 0 && Y>30 && Y<BSP_LCD_GetYSize())
+			{
+				if(X>i && X<(i+TAMQUADRADO) && Y>j && Y<(j+TAMQUADRADO))
+				{
+					drawPiece(i,j);
+					break;
+				}
+
+			}
+			else
+				DBFLAG=0;
+		}
+	}
+}
+
 //GOAL 2
 void tab(){
 	int i=0, j=30;
@@ -167,33 +234,8 @@ void tab(){
 			BSP_LCD_DrawRect(i, j, TAMQUADRADO, TAMQUADRADO);
 		}
 	}
-	limites();
-}
 
-//GOAL 3
-void limites(){
-	int i=0, j=0;
-
-	/*memset(string, '\0', 50);
-	sprintf(string, "X= %d", X);
-	BSP_LCD_ClearStringLine(4);
-	BSP_LCD_DisplayStringAtLine(4, (uint8_t *)string);
-
-	memset(string, '\0', 50);
-	sprintf(string, "Y= %d", Y);
-	BSP_LCD_ClearStringLine(5);
-	BSP_LCD_DisplayStringAtLine(5, (uint8_t *)string);*/
-
-	for(i=0; i<BSP_LCD_GetXSize()-360; i+=TAMQUADRADO){
-		for(j=30;j<BSP_LCD_GetYSize()-30;j+=TAMQUADRADO){
-			if(X<BSP_LCD_GetXSize()-360-RAIO  && X>RAIO && Y>(30+RAIO) && Y<BSP_LCD_GetYSize()-RAIO){
-				if(X>i && X<(i+=TAMQUADRADO) && Y>j && Y<(j+=TAMQUADRADO))
-					drawPiece(i,j);
-			}
-			else
-				DBFLAG=0;
-		}
-	}
+	//limites();
 }
 
 //GOAL 4
@@ -204,67 +246,126 @@ void menu(){
 
 	char escolha[50];
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	MENUFLAG=1;
+
+	sprintf(escolha,"PLAYER vs PLAYER");
+	BSP_LCD_DrawRect(BSP_LCD_GetXSize()-565, BSP_LCD_GetYSize()-400, 350, 60);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-525, BSP_LCD_GetYSize()-375, (uint8_t *) escolha, LEFT_MODE);
+	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()-525);
+
+	sprintf(escolha, "PLAYER vs CPU");
+	BSP_LCD_DrawRect(BSP_LCD_GetXSize()-540, BSP_LCD_GetYSize()-265, 300, 60);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-500, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, LEFT_MODE);
+	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()-500);
 
 
-	printf("Novo Jogo", escolha);
-	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()/4, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, CENTER_MODE);
-	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()/4);
+	while(DBFLAG != 1)	//Enquanto n tocar no lcd
+	{
+		HAL_Delay(100);
+	}
 
-	printf("Carregar Jogo", escolha);
-	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-200, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, CENTER_MODE);
-	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()/4);
 
-	if(X<BSP_LCD_GetXSize()/2 && X>0 && Y>0 && Y<BSP_LCD_GetYSize())
-		joga();
-	//if(X>BSP_LCD_GetXSize()/2 && X<BSP_LCD_GetXSize() && Y>0 && Y<BSP_LCD_GetYSize())
-		//carrega jogo
+
+
+	if(X>BSP_LCD_GetXSize()-565 && X<BSP_LCD_GetYSize()-215 && Y>BSP_LCD_GetYSize()-400 && Y<BSP_LCD_GetYSize()-340)
+	{
+		MENUFLAG=1;
+		tab();
+		//joga();
+	}
+	/*if(X==BSP_LCD_GetXSize()-500 && Y==BSP_LCD_GetYSize()/2){
+	 	MENUFLAG=1;
+		jogaAI();
+	}*/
+
 }
 
-void drawPiece(int i, int j){
+//GOAL6
+void saveSD(){
 
-	//int i=0, j=30;
+	char toques[50];
+	int nbytes;
 
+	sprintf(toques,"Peca branca: %d toques",touchCircle);
+	sprintf(toques,"Peca preta: %d toques",touchFill);
 
-	if(DBFLAG == 1){
-		HAL_Delay(100);
-		DBFLAG=0;
+	if(f_mount(&SDFatFS, SDPath, 0)!= FR_OK)
+		Error_Handler();
+	if(f_open(&SDFile, "toques.txt", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
+		Error_Handler();
+	if(f_write(&SDFile, toques, strlen(toques), &nbytes) != FR_OK){
+		Error_Handler();
+		BSP_LED_Toggle(LED_GREEN);
+		HAL_Delay(250);
+	}
 
-		if(PLAYERFLAG==0){
-			BSP_LCD_DrawCircle((i+TAMQUADRADO)/2, (j+TAMQUADRADO)/2, RAIO);
+	f_close(&SDFile);
+}
+//GOAL7
+void countDown()
+{
+	char t[50];
+	if(PLAYERFLAG==0){
+		sprintf(t, "Countdown: %02ds", ctdown);
+		if(ctdown>10){
+			BSP_LCD_SetBackColor(LCD_COLOR_GREEN);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown<=10 && ctdown>5){
+			BSP_LCD_SetBackColor(LCD_COLOR_YELLOW);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown<=5){
+			BSP_LCD_SetBackColor(LCD_COLOR_RED);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown==0){
+			ctdown=20;
 			PLAYERFLAG=1;
 		}
-		else{
-			BSP_LCD_FillCircle((i+TAMQUADRADO)/2, (j+TAMQUADRADO)/2, RAIO);
+	}
+	if(PLAYERFLAG==1){
+		sprintf(t, "Countdown: %02ds", ctdown);
+		if(ctdown>10){
+			BSP_LCD_SetBackColor(LCD_COLOR_GREEN);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown<=10 && ctdown>5){
+			BSP_LCD_SetBackColor(LCD_COLOR_YELLOW);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown<=5){
+			BSP_LCD_SetBackColor(LCD_COLOR_RED);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+		}
+		if(ctdown==0){
+			ctdown=20;
 			PLAYERFLAG=0;
 		}
 	}
+	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
 }
 
 //GOAL8
-void tempoJogo()
-{
+void tempoJogo(){
+
 	char t[50];
 
-	sprintf(t, "Total Time: %02d:%02d", minutes, seconds);
-	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
-	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 31, (uint8_t *)t, LEFT_MODE);
-	//seconds=timeTotal-(60*i);
-	if(seconds>59){
-		minutes++;
-		seconds=0;
+	if(TIMEFLAG==0)
+	{
+		sprintf(t, "Total Time: %02d:%02d", minutes, seconds);
+		BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+		BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 31, (uint8_t *)t, LEFT_MODE);
+
+		if(seconds>59)
+		{
+			minutes++;
+			seconds=0;
+		}
 	}
 }
 
 //GOAL 9
-
-void joga(){
-	BSP_LCD_Clear(LCD_COLOR_WHITE);
-	temperatura();
-	tab();
-	tempoJogo();
-	if(reset==1)
-	  restart();
-}
 
 void restart(){
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
@@ -280,10 +381,30 @@ void restart(){
 	//FLAGS
 	DBFLAG=0;
 	TEMPFLAG=false;
-	TIMEFLAG=false;
+	TIMEFLAG=0;
 	PLAYERFLAG=0;
+	MENUFLAG=0;
 
 	//menu();
+}
+
+//funcoes de teste
+void joga(){
+	//BSP_LCD_Clear(LCD_COLOR_WHITE);
+	temperatura();
+	tab();
+	tempoJogo();
+	if(ctJogadas==11){
+		saveSD();
+		//restart();
+		menu();
+	}
+	if(reset==1)
+	  restart();
+}
+
+void jogaAI(){
+
 }
 
 void getTouch(){
@@ -345,8 +466,10 @@ int main(void)
   MX_DSIHOST_DSI_Init();
   MX_FMC_Init();
   MX_LTDC_Init();
+  MX_SDMMC2_SD_Init();
   MX_TIM6_Init();
   MX_TIM7_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   LCD_Config();
   	//BSP_LED_Init(LED1);
@@ -359,22 +482,34 @@ int main(void)
   	//HAL_ADC_Start_IT(&hadc3);
 
   	HAL_TIM_Base_Start_IT(&htim6);
+  	HAL_TIM_Base_Start_IT(&htim7);
 
+  	tab();	//TODO: trocar por menu
   	//menu();
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+  while (1)	//TODO: MAIN
   {
-
+	  /*if(MENUFLAG==0)
+		  menu();*/
 	  //joga();
-	  temperatura();
-	  	tab();
-	  	tempoJogo();
-	  	if(reset==1)
-	  	  restart();
+	  temperatura();	//Flags internas: 2s update
+	  tempoJogo();		//Counter 1 sec update
+	  countDown();		//Counter 1 sec update
+
+	  if(UPDATE_DISPLAY == 1)
+	  {
+		  UPDATE_DISPLAY = 0;
+
+		  tab();
+		  limites();
+	  }
+
+
+	  /*if(reset==1)
+	  	  restart();*/
 
 
     /* USER CODE END WHILE */
@@ -407,7 +542,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLM = 25;
   RCC_OscInitStruct.PLL.PLLN = 400;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 8;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -431,13 +566,16 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_LTDC;
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_LTDC|RCC_PERIPHCLK_SDMMC2
+                              |RCC_PERIPHCLK_CLK48;
   PeriphClkInitStruct.PLLSAI.PLLSAIN = 192;
   PeriphClkInitStruct.PLLSAI.PLLSAIR = 2;
   PeriphClkInitStruct.PLLSAI.PLLSAIQ = 2;
   PeriphClkInitStruct.PLLSAI.PLLSAIP = RCC_PLLSAIP_DIV2;
   PeriphClkInitStruct.PLLSAIDivQ = 1;
   PeriphClkInitStruct.PLLSAIDivR = RCC_PLLSAIDIVR_2;
+  PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48SOURCE_PLL;
+  PeriphClkInitStruct.Sdmmc2ClockSelection = RCC_SDMMC2CLKSOURCE_CLK48;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -725,6 +863,34 @@ static void MX_LTDC_Init(void)
 }
 
 /**
+  * @brief SDMMC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SDMMC2_SD_Init(void)
+{
+
+  /* USER CODE BEGIN SDMMC2_Init 0 */
+
+  /* USER CODE END SDMMC2_Init 0 */
+
+  /* USER CODE BEGIN SDMMC2_Init 1 */
+
+  /* USER CODE END SDMMC2_Init 1 */
+  hsd2.Instance = SDMMC2;
+  hsd2.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+  hsd2.Init.ClockBypass = SDMMC_CLOCK_BYPASS_DISABLE;
+  hsd2.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+  hsd2.Init.BusWide = SDMMC_BUS_WIDE_1B;
+  hsd2.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+  hsd2.Init.ClockDiv = 0;
+  /* USER CODE BEGIN SDMMC2_Init 2 */
+
+  /* USER CODE END SDMMC2_Init 2 */
+
+}
+
+/**
   * @brief TIM6 Initialization Function
   * @param None
   * @retval None
@@ -859,8 +1025,8 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOI_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
@@ -870,6 +1036,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PI13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PI15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
 
@@ -930,9 +1102,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) { //comum para todos
 		timeTotal++;
 		seconds++;
 	}
-	if (htim->Instance == TIM7)
-		TIMEFLAG=true;
-
+	if (htim->Instance == TIM7){
+		TIMEFLAG=0;
+		ctdown--;
+	}
 }
 
 /* USER CODE END 4 */
@@ -945,7 +1118,10 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-
+	while(1){
+		BSP_LED_Toggle(LED_RED);
+		HAL_Delay(250);
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 
