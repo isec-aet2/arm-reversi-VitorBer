@@ -29,6 +29,8 @@
 #include "stm32f769i_discovery_ts.h"
 #include "stm32f769i_discovery.h"
 #include <stdbool.h>
+#include "imgBlack.h"
+//#include "imgRed.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -84,10 +86,13 @@ volatile uint8_t ctdown=20;			//contador do tempo de jogada
 volatile uint8_t touchCircle=0;		//contador de toques da peça branca
 volatile uint8_t touchFill=0;		//contador de toques da peça preta
 volatile uint8_t ctJogadas=0;		//contador para o numero de jogadas
+volatile uint8_t ctTimeOut=3;		//contador para o numero de timeouts
+volatile uint8_t ctReset=0;			//contador para o umero de resets
 
+long int JTemp;						//variavel para guardar a temperatura
 char string[50];
 int reset=0;
-
+int passouTempo=0;
 
 //FLAGS
 volatile uint8_t DBFLAG=0; 				//flag para debouncing
@@ -96,6 +101,9 @@ volatile uint8_t PLAYERFLAG=0;			//flag para trocar jogador
 volatile uint8_t TIMEFLAG=0;			//flag para contador decrescente
 volatile uint8_t MENUFLAG=0;			//flag para entrar no menu
 volatile uint8_t UPDATE_DISPLAY = 0;	//flag para update display
+volatile uint8_t LETSPLAY=0;			//flag para iniciar o jogo
+bool VERMELHAJOGOU=false;				//flag para saber se branca jogou numa celula
+bool PRETAJOGOU=false;					//flag para saber se preta jogou numa celula
 
 /* USER CODE END PV */
 
@@ -133,10 +141,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	}
 }
 
-//GOAL1
+//GOAL 1 //temperatura
 void temperatura() {
 	uint32_t ConvertedValue;
-	long int JTemp;
 	char desc[100];
 
 	if(tempCnt >= 2)
@@ -158,6 +165,50 @@ void temperatura() {
 	}
 }
 
+//GOAL6 //saveSD
+void saveSD(){
+
+	char toques[500];
+	uint nbytes;
+
+	sprintf(toques,"Peça vermelha: %d toques Peça preta: %d toques / Tempo decorrido %02d:%02d / Temperatura: %ldC / Nº de resets: %d",touchCircle, touchFill, minutes, seconds, JTemp, ctReset);
+	/*sprintf(toques,"Peca branca: %d toques / ",touchCircle);
+	sprintf(toques,"Peca preta: %d toques / ",touchFill);
+	sprintf(toques,"Tempo decorrido %02d:%02d",minutes,seconds);*/
+
+	if(f_mount(&SDFatFS, SDPath, 0)!= FR_OK)
+		Error_Handler();
+	if(f_open(&SDFile, "toques.txt", FA_WRITE | FA_OPEN_ALWAYS) != FR_OK)
+		Error_Handler();
+	else
+		BSP_LED_Toggle(LED_GREEN);
+	if(f_write(&SDFile, toques, strlen(toques), &nbytes) != FR_OK)
+		Error_Handler();
+	else{
+		BSP_LED_Toggle(LED_GREEN);
+		HAL_Delay(250);
+	}
+
+	f_close(&SDFile);
+}
+
+/*void readSD(){
+	if(f_mount(&SDFatFS, SDPath, 0)!= FR_OK)
+		Error_Handler();
+	if(f_open(&SDFile, "toques.txt", FA_WRITE | FA_OPEN_ALWAYS) != FR_OK){
+		Error_Handler();
+		BSP_LED_Toggle(LED_GREEN);
+		HAL_Delay(250);
+	}
+	if(f_read(&SDFile, toques, strlen(toques), &nbytes) != FR_OK){
+		Error_Handler();
+		BSP_LED_Toggle(LED_GREEN);
+		HAL_Delay(250);
+	}
+	BSP_LCD_DisplayStringAtLine(1, (uint8_t*)toques);
+	f_close(&SDFile);
+}*/
+
 void drawPiece(int i, int j){
 
 	if(DBFLAG == 1){
@@ -165,21 +216,30 @@ void drawPiece(int i, int j){
 		DBFLAG=0;
 
 		if(PLAYERFLAG==0){
-			BSP_LCD_DrawCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
+			BSP_LCD_SetTextColor(LCD_COLOR_RED);
+			BSP_LCD_FillCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
 			PLAYERFLAG=1;
 			touchCircle++;
 			ctJogadas++;
+			VERMELHAJOGOU=true;
+			BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
 		}
 		else{
+			BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
 			BSP_LCD_FillCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
 			PLAYERFLAG=0;
 			touchFill++;
 			ctJogadas++;
+			PRETAJOGOU=true;
+			BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+		}
+		if(ctJogadas==11){
+			saveSD();
 		}
 	}
 }
 
-//GOAL 3
+//GOAL 3 //limites
 void limites()
 {
 	int i=0, j=0;
@@ -205,7 +265,6 @@ void limites()
 					drawPiece(i,j);
 					break;
 				}
-
 			}
 			else
 				DBFLAG=0;
@@ -213,7 +272,7 @@ void limites()
 	}
 }
 
-//GOAL 2
+//GOAL 2 //tab
 void tab(){
 	int i=0, j=30;
 	/*int x=BSP_LCD_GetXSize()/2;
@@ -233,6 +292,8 @@ void tab(){
 			BSP_LCD_SetTextColor(LCD_COLOR_BLACK);*/
 			BSP_LCD_DrawRect(i, j, TAMQUADRADO, TAMQUADRADO);
 		}
+		if(i>168.9 && i<225.2 && j>142.6 && j<198.9)
+			BSP_LCD_DrawCircle(i+(TAMQUADRADO/2), j+(TAMQUADRADO/2), RAIO);
 	}
 
 	//limites();
@@ -240,7 +301,7 @@ void tab(){
 
 //GOAL 4
 
-//GOAL 5
+//GOAL 5 //menu
 void menu(){
 
 
@@ -255,7 +316,7 @@ void menu(){
 
 	sprintf(escolha, "PLAYER vs CPU");
 	BSP_LCD_DrawRect(BSP_LCD_GetXSize()-540, BSP_LCD_GetYSize()-265, 300, 60);
-	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-500, BSP_LCD_GetYSize()/2, (uint8_t *) escolha, LEFT_MODE);
+	BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-500, BSP_LCD_GetYSize()-240, (uint8_t *) escolha, LEFT_MODE);
 	BSP_LCD_ClearStringLine(BSP_LCD_GetXSize()-500);
 
 
@@ -264,89 +325,108 @@ void menu(){
 		HAL_Delay(100);
 	}
 
-
-
-
-	if(X>BSP_LCD_GetXSize()-565 && X<BSP_LCD_GetYSize()-215 && Y>BSP_LCD_GetYSize()-400 && Y<BSP_LCD_GetYSize()-340)
+	if(X>=BSP_LCD_GetXSize()-565 && X<=BSP_LCD_GetYSize()-25 && Y>=BSP_LCD_GetYSize()-400 && Y<=BSP_LCD_GetYSize()-340)
 	{
-		MENUFLAG=1;
-		tab();
+		MENUFLAG=0;
+		UPDATE_DISPLAY=1;
+		//LCD_Config();
+		//LETSPLAY=1;
+		BSP_LCD_Clear(LCD_COLOR_WHITE);
 		//joga();
 	}
-	/*if(X==BSP_LCD_GetXSize()-500 && Y==BSP_LCD_GetYSize()/2){
+	/*if(X==BSP_LCD_GetXSize()-500 && Y==BSP_LCD_GetYSize()-240){
 	 	MENUFLAG=1;
+	 	UPDATE_DISPLAY=1;
 		jogaAI();
 	}*/
 
 }
 
-//GOAL6
-void saveSD(){
-
-	char toques[50];
-	int nbytes;
-
-	sprintf(toques,"Peca branca: %d toques",touchCircle);
-	sprintf(toques,"Peca preta: %d toques",touchFill);
-
-	if(f_mount(&SDFatFS, SDPath, 0)!= FR_OK)
-		Error_Handler();
-	if(f_open(&SDFile, "toques.txt", FA_WRITE | FA_CREATE_ALWAYS) != FR_OK)
-		Error_Handler();
-	if(f_write(&SDFile, toques, strlen(toques), &nbytes) != FR_OK){
-		Error_Handler();
-		BSP_LED_Toggle(LED_GREEN);
-		HAL_Delay(250);
-	}
-
-	f_close(&SDFile);
-}
-//GOAL7
+//GOAL7	//countdown
 void countDown()
 {
 	char t[50];
+	char to[50];
+	char win[50];
+
 	if(PLAYERFLAG==0){
 		sprintf(t, "Countdown: %02ds", ctdown);
+		sprintf(to,"Timeouts %d", ctTimeOut);
 		if(ctdown>10){
 			BSP_LCD_SetBackColor(LCD_COLOR_GREEN);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown<=10 && ctdown>5){
 			BSP_LCD_SetBackColor(LCD_COLOR_YELLOW);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown<=5){
 			BSP_LCD_SetBackColor(LCD_COLOR_RED);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown==0){
+			passouTempo++;
 			ctdown=20;
+			ctTimeOut--;
 			PLAYERFLAG=1;
 		}
+		if(ctTimeOut==0){
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			sprintf(win,"BLACK WINS");
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, BSP_LCD_GetYSize()/2, (uint8_t *)win, LEFT_MODE);
+			//BSP_LCD_Clear(LCD_COLOR_WHITE);
+			BSP_LCD_DrawBitmap(BSP_LCD_GetXSize()-290,BSP_LCD_GetYSize()/2,(uint8_t*) stlogo);
+			LETSPLAY=0;
+			saveSD();
+		}
 	}
+
 	if(PLAYERFLAG==1){
 		sprintf(t, "Countdown: %02ds", ctdown);
+		sprintf(to,"Timeouts %d", ctTimeOut);
 		if(ctdown>10){
 			BSP_LCD_SetBackColor(LCD_COLOR_GREEN);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown<=10 && ctdown>5){
 			BSP_LCD_SetBackColor(LCD_COLOR_YELLOW);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown<=5){
 			BSP_LCD_SetBackColor(LCD_COLOR_RED);
 			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 55, (uint8_t *)t, LEFT_MODE);
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, 85, (uint8_t *)to, LEFT_MODE);
 		}
 		if(ctdown==0){
 			ctdown=20;
+			ctTimeOut--;
 			PLAYERFLAG=0;
+		}
+		if(ctTimeOut==0){
+			BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+			sprintf(win,"RED WINS");
+			BSP_LCD_DisplayStringAt(BSP_LCD_GetXSize()-290, BSP_LCD_GetYSize()/2, (uint8_t *)win, LEFT_MODE);
+			//BSP_LCD_Clear(LCD_COLOR_WHITE);
+			//BSP_LCD_DrawBitmap(BSP_LCD_GetXSize()-290,BSP_LCD_GetYSize()/2,(uint8_t*) stlogo);
+			LETSPLAY=0;
+			saveSD();
 		}
 	}
 	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
 }
 
-//GOAL8
+//GOAL8	//tempoJogo
 void tempoJogo(){
 
 	char t[50];
@@ -365,30 +445,39 @@ void tempoJogo(){
 	}
 }
 
-//GOAL 9
-
+//GOAL 9	//restart
 void restart(){
 	BSP_LCD_Clear(LCD_COLOR_WHITE);
-	LCD_Config();
+	menu();
 
-	reset=0;
-	timeTotal=0;
+	ConvertedValue;
 	tempCnt = 0;
+	timeTotal=0;
 	seconds = 0;
 	minutes=0;
+	ctdown=20;
+	touchCircle=0;
+	touchFill=0;
+	ctJogadas=0;
+	ctTimeOut=3;
+	ctReset=0;
 
+	reset=0;
+	passouTempo=0;
 
 	//FLAGS
 	DBFLAG=0;
 	TEMPFLAG=false;
-	TIMEFLAG=0;
 	PLAYERFLAG=0;
+	TIMEFLAG=0;
 	MENUFLAG=0;
-
-	//menu();
+	UPDATE_DISPLAY = 0;
+	//LETSPLAY=0;
+	VERMELHAJOGOU=false;
+	PRETAJOGOU=false;
 }
 
-//funcoes de teste
+//funcoes de apoio
 void joga(){
 	//BSP_LCD_Clear(LCD_COLOR_WHITE);
 	temperatura();
@@ -423,6 +512,12 @@ void getTouch(){
 
 		  }
 }
+/*void header(){
+	BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
+	BSP_LCD_SetBackColor(LCD_COLOR_BLUE);
+	BSP_LCD_SetFont(&Font24);
+	BSP_LCD_DisplayStringAt(0, 5, (uint8_t *)"REVERSI PROJECT", CENTER_MODE);
+}*/
 
 /* USER CODE END 0 */
 
@@ -484,38 +579,42 @@ int main(void)
   	HAL_TIM_Base_Start_IT(&htim6);
   	HAL_TIM_Base_Start_IT(&htim7);
 
-  	tab();	//TODO: trocar por menu
-  	//menu();
+  	//tab();	//TODO: trocar por menu
+  	menu();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)	//TODO: MAIN
+  while (1)
   {
 	  /*if(MENUFLAG==0)
 		  menu();*/
 	  //joga();
 	  temperatura();	//Flags internas: 2s update
+	  //if(LETSPLAY==1){
 	  tempoJogo();		//Counter 1 sec update
 	  countDown();		//Counter 1 sec update
+	  //}
 
 	  if(UPDATE_DISPLAY == 1)
 	  {
 		  UPDATE_DISPLAY = 0;
-
 		  tab();
 		  limites();
 	  }
 
 
-	  /*if(reset==1)
-	  	  restart();*/
+	  if(reset==1){
+	  	  restart();
+	  	  ctReset++;
+	  }
 
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
+  //LETSPLAY=0;
   /* USER CODE END 3 */
 }
 
